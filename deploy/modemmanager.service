@@ -1,0 +1,40 @@
+[Unit]
+Description=Monitor for USB modems (SMS, calls, Telegram alerts)
+Documentation=file:///opt/modemmanager/README.md
+After=network-online.target
+Wants=network-online.target
+# ModemManager конкурирует за те же порты. Если он не отключён на хосте,
+# правила udev должны исключить порты из его управления (см. 99-modemmanager.rules).
+Conflicts=ModemManager.service
+
+[Service]
+Type=simple
+User=modemmanager
+Group=modemmanager
+# Дополнительная группа для доступа к последовательным портам, если файлам
+# правил не удалось выставить группу (например, до перезагрузки).
+SupplementaryGroups=dialout
+
+# Настройки и журнал живут в персистентной директории. Права 0700 на неё,
+# файл settings.json -- 0600 (обеспечивает само приложение).
+Environment=MODEMMANAGER_CONFIG=/etc/modemmanager/settings.json
+Environment=MODEMMANAGER_EVENTS=/var/lib/modemmanager/events.jsonl
+
+WorkingDirectory=/opt/modemmanager
+ExecStart=/opt/modemmanager/.venv/bin/modemmanager
+Restart=on-failure
+RestartSec=5s
+
+# Умеренные ограничения ядра: приложение не открывает много файлов, но десятки
+# последовательных портов + HTTP-соединения оправдывают явный лимит.
+LimitNOFILE=4096
+
+# Мягкое усиление: сервис не пишет никуда, кроме своих директорий.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/modemmanager /etc/modemmanager
+
+[Install]
+WantedBy=multi-user.target

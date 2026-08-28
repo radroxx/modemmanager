@@ -1,0 +1,46 @@
+{
+  "web": {
+    "host": "127.0.0.1",
+    "port": 8080,
+    "password": ""
+  },
+  "telegram": {
+    "token": "",
+    "admin_chat_id": "",
+    "api_base": "https://api.telegram.org",
+    "max_retry_delay": 300.0
+  },
+  "discovery": {
+    "drivers": [
+      "option1",
+      "ch341-uart",
+      "cp210x",
+      "ftdi_sio"
+    ],
+    "sysfs_root": "/sys",
+    "dev_root": "/dev",
+    "scan_interval": 2.0,
+    "gone_debounce": 5.0,
+    "probe_baudrates": [
+      115200,
+      9600
+    ],
+    "probe_timeout": 2.0,
+    "port_baudrate": {},
+    "fault_retry_interval": 60.0
+  },
+  "intervals": {
+    "signal": 30.0,
+    "registration": 30.0,
+    "storage": 300.0,
+    "no_service_alert": 900.0
+  },
+  "sms": {
+    "assembly_timeout": 600.0
+  },
+  "calls": {
+    "clip_wait": 2.0,
+    "ring_dedup": 15.0
+  },
+  "sims": {}
+}
