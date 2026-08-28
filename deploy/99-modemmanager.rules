@@ -1,0 +1,37 @@
+# Правила udev для modemmanager.
+#
+# Что делают:
+#   1. Дают процессу под группой ``modemmanager`` доступ к последовательным
+#      портам известных USB-модемов -- без ``sudo``. Права ``0660``: чтение и
+#      запись группе, посторонним ничего.
+#   2. Исключают эти же порты из управления системным менеджером модемов
+#      (``ModemManager``), иначе тот удерживает их и конкурирует за AT.
+#
+# Установка:
+#   sudo groupadd -f modemmanager
+#   sudo usermod -aG modemmanager <user, под которым работает служба>
+#   sudo cp deploy/99-modemmanager.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload
+#   sudo udevadm trigger --subsystem-match=usb --action=add
+#
+# Проверка (см. tasks 12.1/12.2):
+#   * ``ls -l /dev/ttyUSB*`` -- владелец root, группа ``modemmanager``, права 0660;
+#   * ``lsof /dev/ttyUSB*`` -- ``ModemManager`` там не должен фигурировать;
+#   * приложение открывает порт без прав суперпользователя.
+#
+# Наборы идентификаторов покрывают:
+#   - Huawei USB-модемы (12d1:*) на драйвере ``option``;
+#   - Универсальный мост CH340 (1a86:7523) на драйвере ``ch341``.
+# Если добавляется новое семейство модемов, дописывается соответствующая
+# строка -- фильтр по драйверу обязательно должен присутствовать, чтобы
+# правила не задевали посторонние устройства с тем же VID:PID.
+
+# --- Huawei ------------------------------------------------------------
+SUBSYSTEM=="tty", ATTRS{idVendor}=="12d1", DRIVERS=="option", \
+    GROUP="modemmanager", MODE="0660", \
+    ENV{ID_MM_DEVICE_IGNORE}="1", ENV{ID_MM_PORT_IGNORE}="1"
+
+# --- SIM800 / SIM900 / SIM868 через мост CH340 -----------------------
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", DRIVERS=="ch341", \
+    GROUP="modemmanager", MODE="0660", \
+    ENV{ID_MM_DEVICE_IGNORE}="1", ENV{ID_MM_PORT_IGNORE}="1"
