@@ -49,6 +49,10 @@ class SmsService:
         )
         self._clock = clock
         self._next_expire: float = 0.0
+        #: When to run the next backup poll of message storage. Reset right
+        #: after the startup drain, so it isn't duplicated on the very first
+        #: poll cycle.
+        self._next_backlog_poll: float = 0.0
         #: Индексы, для которых не удалось прочитать сообщение (журнал уже написан).
         #: Хранится, чтобы то же самое уведомление не считалось ещё раз.
         self._failed_reads: set[int] = set()
@@ -62,6 +66,10 @@ class SmsService:
         # простоя приложения (см. spec, 6.3): память сообщений нельзя оставлять
         # занятой -- это одна из вероятных причин молчаливой потери SMS.
         await self._drain_backlog()
+        # The next backup poll is not due until a full interval after this
+        # drain: it already did the same thing, so repeating it on the very
+        # first poll cycle would be pointless.
+        self._next_backlog_poll = self._clock() + self.store.settings.sms.backlog_poll_interval
 
     async def stop(self) -> None:
         self.modem = None
@@ -75,32 +83,48 @@ class SmsService:
         await self._read_and_publish(index)
 
     async def poll(self) -> None:
-        """Проверяет, не пора ли снять группы сборки по таймауту."""
+        """Expires assembly groups past their timeout and runs a backup poll
+        of message storage -- in case the modem never sent `+CMTI` (a known
+        quirk of part of the Huawei E1550 firmware range: the command is
+        accepted, but the notification doesn't always follow).
+        """
         now = self._clock()
-        if now < self._next_expire:
-            return
-        self._next_expire = now + _EXPIRE_CHECK_INTERVAL
-        for assembled in self.assembler.expire():
-            await self._publish_assembled(assembled)
+        if now >= self._next_expire:
+            self._next_expire = now + _EXPIRE_CHECK_INTERVAL
+            for assembled in self.assembler.expire():
+                await self._publish_assembled(assembled)
+        if now >= self._next_backlog_poll:
+            self._next_backlog_poll = now + self.store.settings.sms.backlog_poll_interval
+            found = await self._drain_backlog()
+            if found and self.modem is not None:
+                log.info(
+                    "%s: резервный опрос нашёл %d сообщ. без уведомления +CMTI",
+                    self.modem.usb_path,
+                    found,
+                )
 
     # ---------------------------------------------------------------- операции
 
-    async def _drain_backlog(self) -> None:
-        """Читает и удаляет всё, что накопилось в памяти сообщений.
+    async def _drain_backlog(self) -> int:
+        """Reads and deletes everything accumulated in message storage.
 
-        Каждое сообщение сначала удаляется, потом отдаётся в сборку и в
-        уведомление -- порядок такой же, как для сообщений, пришедших по
-        уведомлению (см. spec, 6.4).
+        Each message is deleted first, then handed off to assembly and
+        notification -- the same order as for a message delivered via
+        notification (see spec, 6.4). Returns the number of messages
+        processed: the backup poll needs to know whether it found anything,
+        to tell such a find apart from normal `+CMTI` delivery.
         """
         assert self.modem is not None
         try:
             response = await self.modem.session.execute("AT+CMGL=4", timeout=15.0)
         except AtError as exc:
             log.info("%s: выгребание сообщений не удалось (%s)", self.modem.usb_path, exc)
-            return
-        for index, pdu_hex in _parse_cmgl(response.text):
+            return 0
+        items = _parse_cmgl(response.text)
+        for index, pdu_hex in items:
             await self._delete(index)
             await self._process(index, pdu_hex)
+        return len(items)
 
     async def _read_and_publish(self, index: int) -> None:
         assert self.modem is not None

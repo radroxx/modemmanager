@@ -115,6 +115,11 @@ class IntervalSettings:
 @dataclass
 class SmsSettings:
     assembly_timeout: float = 600.0
+    # Interval of the backup message-storage poll -- a safeguard in case the
+    # modem never sends `+CMTI` (a known quirk of part of the Huawei E1550
+    # firmware range): instead of relying solely on the notification, the
+    # system periodically drains storage itself.
+    backlog_poll_interval: float = 60.0
 
 
 @dataclass

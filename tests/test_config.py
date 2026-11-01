@@ -46,6 +46,29 @@ def test_at_trace_is_read_from_settings(tmp_path):
     assert settings.discovery.at_trace is True
 
 
+def test_sms_backlog_poll_interval_defaults_when_absent(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text(
+        json.dumps({"sms": {"assembly_timeout": 300.0}}), encoding="utf-8"
+    )
+
+    settings = SettingsStore(path).load()
+
+    assert settings.sms.backlog_poll_interval == 60.0
+    assert settings.sms.assembly_timeout == 300.0
+
+
+def test_sms_backlog_poll_interval_is_read_from_settings(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text(
+        json.dumps({"sms": {"backlog_poll_interval": 15.0}}), encoding="utf-8"
+    )
+
+    settings = SettingsStore(path).load()
+
+    assert settings.sms.backlog_poll_interval == 15.0
+
+
 def test_partial_file_keeps_defaults_for_absent_sections(tmp_path):
     path = tmp_path / "settings.json"
     path.write_text(json.dumps({"web": {"port": 9999}}), encoding="utf-8")

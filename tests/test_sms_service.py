@@ -250,6 +250,87 @@ async def test_storage_reading_reaches_modem_state_via_regular_poll():
         await modem.stop()
 
 
+# ----------------------- backup poll of storage when +CMTI is missed
+
+@pytest.mark.asyncio
+async def test_backup_poll_drains_message_without_cmti():
+    """The backup poll drains a message for which +CMTI never arrived."""
+    responses = dict(HUAWEI)
+    responses["AT+CMGL=4"] = "OK"  # empty at startup
+    transport = FakeTransport(responses)
+    store = _store()
+    store.settings.sms.backlog_poll_interval = 30.0
+    events: list[Event] = []
+    modem, service = await _run_modem(transport, store, events=events)
+    try:
+        # Message "appears" in storage after startup, but no notification came.
+        pdu = build_deliver(sender=SENDER, text="missed notification")
+        transport.set_response("AT+CMGL=4", _cmgl_response((7, pdu)))
+        transport.set_response("AT+CMGD=7", "OK")
+
+        # Force the backup poll to fire without waiting for the interval.
+        service._next_backlog_poll = 0.0
+        await service.poll()
+
+        assert "AT+CMGD=7" in transport.commands
+        sms_events = [event for event in events if event.type == EventType.SMS]
+        assert len(sms_events) == 1
+        assert sms_events[0].data["text"] == "missed notification"
+    finally:
+        await modem.stop()
+
+
+@pytest.mark.asyncio
+async def test_backup_poll_does_not_duplicate_message_delivered_via_cmti():
+    """A message already processed via +CMTI is not published again."""
+    responses = dict(HUAWEI)
+    pdu = build_deliver(sender=SENDER, text="delivered normally")
+    responses["AT+CMGR=3"] = _cmgr_response(pdu)
+    responses["AT+CMGD=3"] = "OK"
+    responses["AT+CMGL=4"] = "OK"  # empty both at startup and at the backup poll
+
+    transport = FakeTransport(responses)
+    store = _store()
+    events: list[Event] = []
+    modem, service = await _run_modem(transport, store, events=events)
+    try:
+        transport.queue_unsolicited('+CMTI: "SM",3')
+        for _ in range(10):
+            await asyncio.sleep(0)
+
+        # Backup poll: AT+CMGL=4 still replies "OK" -- the message was already
+        # deleted via the notification, nothing left to find.
+        service._next_backlog_poll = 0.0
+        await service.poll()
+
+        sms_events = [event for event in events if event.type == EventType.SMS]
+        assert len(sms_events) == 1
+        assert sms_events[0].data["text"] == "delivered normally"
+    finally:
+        await modem.stop()
+
+
+@pytest.mark.asyncio
+async def test_backup_poll_does_not_fire_before_interval_elapses():
+    """Before the interval elapses, repeated ``poll()`` calls don't re-issue AT+CMGL=4."""
+    responses = dict(HUAWEI)
+    responses["AT+CMGL=4"] = "OK"
+    transport = FakeTransport(responses)
+    store = _store()
+    store.settings.sms.backlog_poll_interval = 1000.0
+    modem, service = await _run_modem(transport, store)
+    try:
+        count_after_start = transport.commands.count("AT+CMGL=4")
+        assert count_after_start == 1  # only the startup drain
+
+        await service.poll()
+        await service.poll()
+
+        assert transport.commands.count("AT+CMGL=4") == count_after_start
+    finally:
+        await modem.stop()
+
+
 # ------------------------------------------------------------ отдельно: разбор
 
 def test_cmgr_and_cmgl_parsers_are_forgiving():

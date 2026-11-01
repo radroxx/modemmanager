@@ -221,3 +221,14 @@ __marimo__/
 node_modules/
 package.json
 package-lock.json
+
+
+.claude/
+Makefile
+app.zip
+events.jsonl
+requirements.zip
+settings_test.json
+test.sh
+uv.lock
+vendor/
